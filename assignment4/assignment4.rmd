@@ -1,0 +1,339 @@
+---
+title: "BSDA: Assignment 4"
+author: "Anonymous student"
+output: 
+  pdf_document: 
+    toc: yes
+    toc_depth: 1
+header-includes:
+- \usepackage{float}
+- \usepackage{graphicx}
+- \usepackage{amsmath}
+- \usepackage{relsize}
+- \usepackage{cancel}
+- \usepackage{booktabs}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# General Information to include
+
+-   **Time used for reading and self-study exercises**: \~ 5 hours.
+-   **Time used for the assignment**: \~11 hours
+-   **Good with assignment**: Implement importance sampling in a step by step way, in this way is easy to understand it and you actually know what's going on.
+-   **Things to improve in the assignment**: I felt like this time the assignment was a little bit harder to solve just by reading chapter 10. I had some trouble understanding why in the last question the variance identity was proposed as a hint, instead of just using var() function.
+
+```{r setup, include=FALSE}
+# This chunk sets echo = TRUE as default, that is, print all code.
+# knitr::opts_chunk$set can be used to set other notebook generation options, too.
+# include=FALSE inside curly brackets makes this block not be included in the pdf.
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Bioassay model
+
+```{r, message=FALSE, warning=FALSE}
+library(bsda)
+library(ggplot2)
+library(tidyverse)
+library(kableExtra)
+```
+
+## a) In the prior distribution for $(\alpha,\beta)$, the marginal distributions are $\alpha \sim N(0,2^2)$ and $\beta \sim N(10,10^2)$, and the correlation between them is $\mathrm{corr}(\alpha, \beta)=0.6$. Report the mean (vector of two values) and covariance (two by two matrix) of the bivariate normal distribution.
+
+We have a bivariate normal distribution as the joint prior distribution of the parameters $\alpha$ and $\beta$:
+
+$$
+\begin{aligned}
+\begin{pmatrix}
+ \alpha \\
+ \beta
+\end{pmatrix}  \sim \mathcal{N} \left( \begin{pmatrix}
+ \mu_{\alpha} \\
+ \mu_{\beta}
+\end{pmatrix} , \begin{pmatrix}
+ \sigma^2_{\alpha} &  \rho \sigma_{\alpha} \sigma_{\beta} \\
+ \rho \sigma_{\alpha} \sigma_{\beta} &  \sigma^2_{\beta}
+\end{pmatrix} \right)
+\end{aligned}
+$$ 
+Then:
+
+$$
+\begin{aligned}
+ \begin{pmatrix}
+ \mu_{\alpha} \\
+ \mu_{\beta}
+\end{pmatrix} &=  \begin{pmatrix}
+ 0 \\
+ 10
+\end{pmatrix}\\
+\begin{pmatrix}
+ \sigma^2_{\alpha} &  \rho \sigma_{\alpha} \sigma_{\beta} \\
+ \rho \sigma_{\alpha} \sigma_{\beta} &  \sigma^2_{\beta}
+\end{pmatrix} &= \begin{pmatrix}
+ 2^2 &  0.6\cdot 2 \cdot 10 \\
+ 0.6\cdot 2 \cdot 10  &  10^2 
+\end{pmatrix} = \begin{pmatrix}
+ 4 &  12 \\
+ 12  &  100 
+\end{pmatrix}\\ \\
+\begin{pmatrix}
+ \alpha \\
+ \beta
+\end{pmatrix}  &\sim \mathcal{N} \left( \begin{pmatrix}
+ 0 \\
+ 10
+\end{pmatrix} , \begin{pmatrix}
+ 4 &   12 \\
+ 12 &  100
+\end{pmatrix} \right)
+\end{aligned}
+$$
+
+
+## b) You are given 4000 independent draws from the posterior distribution of the model. Load the draws with \texttt{ data("bioassay\_posterior")}. Report the mean as well as 5 $\%$ and 95 $\%$ quantiles separately for both $\alpha$ and $\beta$. Report also the Monte Carlo standard errors (MCSEs) for the mean and quantile estimates. Report as many digits for the mean and quantiles as the MCSEs allow. In other words, leave out digits where MCSE is nonzero. Explain in words what does Monte Carlo standard error mean and how you decided the number of digits to show.
+
+```{r, fig.height= 4}
+data("bioassay_posterior")
+
+bioassay_df <- tibble(bioassay_posterior) 
+
+#plot draws
+ggplot(bioassay_df, aes(x = alpha, y = beta)) +
+  geom_point() +
+  geom_density_2d(bins = 5, linetype = 2) + theme_classic()
+
+#mean alpha
+mean_a <- mean(bioassay_posterior$alpha)
+mean_a
+
+#quantiles alpha
+quantile_5_a <- quantile(bioassay_posterior$alpha, 0.05)
+quantile_95_a <- quantile(bioassay_posterior$alpha, 0.95)
+c(quantile_5_a, quantile_95_a)
+
+#mean beta
+mean_b <- mean(bioassay_posterior$beta)
+mean_b
+
+#quantiles beta
+quantile_5_b <- quantile(bioassay_posterior$beta, 0.05)
+quantile_95_b <- quantile(bioassay_posterior$beta, 0.95)
+c(quantile_5_b, quantile_95_b)
+
+#mcse mean alpha
+mcse_mean_a <- sqrt(var(bioassay_posterior$alpha)/length(bioassay_posterior$alpha))
+mcse_mean_a
+
+#mcse mean beta
+mcse_mean_b <- sqrt(var(bioassay_posterior$beta)/length(bioassay_posterior$beta))
+mcse_mean_b
+
+#mcse quantiles alpha
+mcse_q_5_a <- mcse_quantile(bioassay_posterior$alpha, 0.05)
+mcse_q_95_a <- mcse_quantile(bioassay_posterior$alpha, 0.95)
+c(mcse_q_5_a$mcse, mcse_q_95_a$mcse)
+
+#mcse quantiles beta
+mcse_q_5_b <- mcse_quantile(bioassay_posterior$beta, 0.05)
+mcse_q_95_b <- mcse_quantile(bioassay_posterior$beta, 0.95)
+c(mcse_q_5_b$mcse, mcse_q_95_b$mcse)
+```
+
+Given that we have samples $\alpha_s, \beta_s \sim p(\alpha, \beta|y)$:
+
+the MCSEs for the $\alpha$ and $\beta$ mean estimates are `r mcse_mean_a`, and `r mcse_mean_b` respectively. Additionally, the MCSEs for the $\alpha$ and $\beta$ quantile estimates are:
+
+```{r, echo=FALSE}
+
+parameter <- c('alpha', 'beta')
+mcse_q_5 <- c(mcse_q_5_a, mcse_q_5_b)
+mcse_q_95 <- c(mcse_q_95_a, mcse_q_95_b)
+
+mcse_q <- tibble(parameter, mcse_q_5, mcse_q_95)
+
+knitr::kable(mcse_q, format = "latex", booktabs = TRUE, align = "c",
+             col.names = c("Parameter",
+                           "5%",
+                           "95%"))
+
+```
+
+Then we can report the mean and quantiles estimates for $\alpha$ as:
+
+$$
+\begin{aligned}
+E_{p(\alpha|y)} \left( \alpha\right) =`r format(round(mean_a,1), nsmall = 1)` \\
+\text{quantiles 5\% and 95\%: } [`r round(quantile_5_a,1)`, `r round(quantile_95_a,1)`]
+\end{aligned}
+$$
+and  the mean and quantiles estimates for $\beta$ as:
+
+$$
+\begin{aligned}
+E_{p(\beta|y)} \left( \beta\right) =`r round(mean_b,1)`\\
+\text{quantiles 5\% and 95\%: } [`r format(round(quantile_5_b,1), nsmall = 1)`, `r round(quantile_95_b,0)`]
+\end{aligned}
+$$
+The MCSE is an estimate of the variability in the samples obtained from a Monte Carlo simulation due to the randomness in the sampling process. We are deciding the digits to report by leaving out digits that are just random noise, for example looking at a MCSE of `r mcse_mean_a`, we will only report the digits where this MCSE is 0, so we will report `r format(round(mean_a,1), nsmall = 1)` instead of `r mean_a`.
+
+
+## c) Implement a function for computing the log importance ratios (log importance weights) when the importance sampling \textbf{target distribution} is the posterior distribution, and the \textbf{proposal distribution} is the prior distribution from a). Below is a test example, the functions can also be tested with \texttt{markmyassignment}. Explain in words why it's better to compute log ratios instead of ratios.
+
+From equation 10.3 in BDA3 importance weights are derived from the equation:
+
+$$
+\begin{aligned} 
+w(\theta^s) = \frac{q(\theta^s|y)}{g(\theta^s)}
+\end{aligned} 
+$$
+where q is the notation for unnormalized densities, that is $q(\theta|y)$ equals $p(\theta|y)$ times some factor that doesn't depend on $\theta$. In the usual use of Bayes' Theorem we work with $p(\theta)p(y|\theta)$. Substituting this expression:
+
+$$
+\begin{aligned}
+w(\theta^s)  = \frac{p(\theta^s) p(y|\theta^s)}{p(\theta^s)} = p(y|\theta^s)
+\end{aligned}
+$$ 
+
+```{r}
+data("bioassay")
+
+log_importance_weights <- function(alpha, beta) {
+  
+  log_w <- bioassaylp(alpha, beta, bioassay$x, bioassay$y, bioassay$n)
+  
+  return(log_w)
+}
+```
+
+Floating-point representation in computers can only represent a finite number of digits. This can lead to overflow issues, where the number becomes too large to be represented accurately using the available bits in a computer's memory. This can also lead to underflow issues, where the number becomes too close to zero to be precisely represented. Using logarithms instead can help, because it turns very small numbers into negative values with reasonable magnitudes, preventing them from being treated as zero in calculations. Additionally, logarithms  convert multiplication and division into addition and subtraction, which makes it easier to make computations with numbers on a wide range of magnitudes.
+
+
+
+## d) Implement a function for computing normalized importance ratios from the unnormalized log ratios in c). In other words, exponentiate the log ratios and scale them such that they sum to one. Explain in words what is the effect of exponentiating and scaling so that sum is one. 
+
+Normalized weights:
+
+$$
+\begin{aligned}
+\tilde w(\theta^s)  = \frac{w(\theta^s)}{\sum^S_{s^{\prime}=1} w(\theta^{s^{\prime}})} 
+\end{aligned}
+$$ 
+
+```{r}
+normalized_importance_weights <- function(alpha, beta) {
+  
+  log_w <- log_importance_weights(alpha, beta)
+  
+  e_w <- exp(log_w)
+  
+  e_norm_w <- e_w/sum(e_w)
+  
+  return(e_norm_w)
+}
+```
+
+Exponentiation "undoes" the logarithmic transformation and transforms the log weights back into their original scale. Scaling involves dividing each weight by the sum of all the weights to ensure that the total weight assigned to all samples is equal to one. In this way the normalized weights correspond to the volume of space represented by $\theta^s$, these normalized weights indicate the relative probability that a specific sample represents the parameter space therefore they must sum to 1.
+
+
+## e) Sample 4000 draws of $\alpha$ and $\beta$ from the prior distribution from a). Compute and plot a histogram of the 4000 normalized importance ratios. Use the functions you implemented in c) and d).
+
+
+```{r}
+set.seed(987)
+sample <- rmvnorm(4000, c(0,10), matrix(c(4,12,12,100),nrow = 2, 
+                                        ncol = 2,byrow = TRUE))
+n_weights <- normalized_importance_weights(sample[,1], sample[,2])
+
+hist(n_weights, breaks = 50,
+     xlab = "Normalized importance ratios", ylab = "Frequency",
+     main = "Histogram of 4000 normalized importance ratios")
+```
+
+## f) Using the importance ratios, compute the importance sampling effective sample size $S_{\text{eff}}$ and report it.
+
+
+```{r}
+is.finite(var(n_weights))
+
+S_eff <- function(alpha, beta) {
+  
+  s_eff <- 1/sum(normalized_importance_weights(alpha, beta)^2)
+  
+  return(s_eff)
+}
+
+S_eff(sample[,1], sample[,2])
+```
+
+Given that the variance of the weights is finite, we can calculate the importance sampling effective sample size using the following approximation:
+
+$$
+\begin{aligned}
+S_{\text{eff}} = \frac{1}{\sum^S_{s=1} (\tilde{w}(\theta^{s}))^2} = `r round(S_eff(sample[,1], sample[,2]), 3)`
+\end{aligned}
+$$ 
+
+## g) Explain in your own words what the importance sampling effective sample size represents. Also explain how the effective sample size is seen in the histogram of the weights that you plotted in e).
+
+In importance sampling we generate draws and each draw is associated with a weight. These weights indicate how well each draw represents the target distribution we want to estimate. Some draws are more important, then they have higher weights, while others are less important --lower weights. The importance sampling effective sample size tells us how many equally informative, independent draws we effectively have, given the weighted sample we generated. Therefore, by looking at the equation we can see it penalizes draws with large weights (which are less common) and rewards draws with small weights (which are more common). The larger the weights, the more they contribute to reducing $S_{\text{eff}}$, while smaller weights increase $S_{\text{eff}}$.
+
+```{r, echo=FALSE}
+hist(n_weights, breaks = 50,
+     xlab = "Normalized importance ratios", ylab = "Frequency",
+     main = "Histogram of 4000 normalized importance ratios")
+abline(v = 1/4000, col = "blue", lty = 2)
+text(x = 1/4000 + 0.0001, y = 2000, labels = "1/4000")
+```
+
+If only one weight is dominating the effective sample approximation computes an effective sample size of 1. If all the weights are equal then the approximation would compute an effective sample size of $4000$. For this case we can see that we are somewhere between there, meaning that we have not only one dominating weight neither equal weights, giving us an effective sample size of `r round(S_eff(sample[,1], sample[,2]), 3)`. This is a way of estimating how good our proposal distribution is. If we would be drawing from the actual target distribution the importance weights would be $\frac{1}{4000}$, from the plot we can see that some of the draws have smaller weights and some of them have larger weights. We can see that there are some weights around $\frac{1}{4000}$, so we should expect an effective sample size smaller than 4000. 
+
+
+## h) Implement a function for computing the posterior mean using importance sampling, and compute the mean using your 4000 draws. Explain in your own words the computation for importance sampling. Report the means for alpha and beta, and also the Monte Carlo standard errors (MCSEs) for the mean estimates. Report the number of digits for the means based on the MCSEs.
+
+```{r}
+posterior_mean <- function(alpha, beta) {
+  
+  mean_a <- mean(alpha*normalized_importance_weights(alpha, beta)) /
+    mean(normalized_importance_weights(alpha, beta))
+  mean_b <- mean(beta*normalized_importance_weights(alpha, beta))/
+    mean(normalized_importance_weights(alpha, beta))
+  
+  return(c(mean_a, mean_b))
+}
+
+
+posterior_mean(sample[,1], sample[,2])
+
+mean_a_2 <- mean(sample[,1]^2*normalized_importance_weights(sample[,1], 
+                                                            sample[,2])) /
+  mean(normalized_importance_weights(sample[,1], sample[,2]))
+
+mean_b_2 <- mean(sample[,2]^2*normalized_importance_weights(sample[,1], 
+                                                            sample[,2])) /
+  mean(normalized_importance_weights(sample[,1], sample[,2]))
+
+var_a <- mean_a_2 - posterior_mean(sample[,1], sample[,2])[1]^2
+var_b <- mean_b_2 - posterior_mean(sample[,1], sample[,2])[2]^2
+
+c(sqrt(var_a / S_eff(sample[,1], sample[,2])), 
+  sqrt(var_b / S_eff(sample[,1], sample[,2])))
+```
+
+the MCSEs for the $\alpha$ and $\beta$ posterior mean estimates are `r sqrt(var_a / S_eff(sample[,1], sample[,2]))`, and `r sqrt(var_b / S_eff(sample[,1], sample[,2]))` respectively. Then we can report the mean estimates for $\alpha$ and $\beta$ as `r format(round(posterior_mean(sample[,1], sample[,2])[1],1),nsmall = 1)` and `r round(posterior_mean(sample[,1], sample[,2])[2],0)`
+
+
+Importance sampling is used to estimate properties of a target probability distribution when it's difficult to directly sample from that distribution. For sampling distribution, we start with a target  distribution that we are interested in, then we choose a different distribution $g(\theta)$, called the proposal distribution, which is a probability density from which we can generate  $S$ draws $\theta^1, \theta^2, \dots, \theta^S$. For each draw generated from the proposal distribution, we calculate a weight. These weights represent how well the sample represents the target distribution. Finally, we use the draws and their weights to estimate properties of the target distribution. In importance sampling we don't require the proposal to be everywhere higher than the target distribution, since we can make a correction in both directions. We can make a correction if the target is actually lower than the proposal or if it's actually higher. When we compute the expectation we are weighting these draws by a ratio between the proposal and the target, the weights are the target divided by the proposal density. If the target distribution is higher than the proposal there is a higher weight, and if the target is lower than the proposal there is a lower weight.
+
+
+$$
+\begin{aligned}
+E[f(\theta)] \approx \frac{\sum_s w_s f(\theta^{(s)})}{\sum_s
+      w_s}, \qquad \text{where} \quad
+      w_s =  \frac{q(\theta^{(s)})}{g(\theta^{(s)})} \qquad
+\end{aligned}
+$$
+
+
