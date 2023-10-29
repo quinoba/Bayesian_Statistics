@@ -1,0 +1,373 @@
+---
+title: "BSDA: Assignment 8"
+author: "Anonymous student"
+output: 
+  pdf_document: 
+    toc: yes
+    toc_depth: 1
+header-includes:
+- \usepackage{float}
+- \usepackage{graphicx}
+- \usepackage{amsmath}
+- \usepackage{relsize}
+- \usepackage{cancel}
+- \usepackage{booktabs}
+- \DeclareMathOperator{\E}{E}
+- \DeclareMathOperator{\Var}{Var}
+- \DeclareMathOperator{\var}{var}
+- \DeclareMathOperator{\Sd}{Sd}
+- \DeclareMathOperator{\sd}{sd}
+- \DeclareMathOperator{\Bin}{Bin}
+- \DeclareMathOperator{\Beta}{Beta}
+- \DeclareMathOperator{\Poisson}{Poisson}
+- \DeclareMathOperator{\betacdf}{betacdf}
+- \DeclareMathOperator{\Invchi2}{Inv-\chi^2}
+- \DeclareMathOperator{\logit}{logit}
+- \DeclareMathOperator{\N}{N}
+- \DeclareMathOperator{\U}{U}
+- \DeclareMathOperator{\tr}{tr}
+- \DeclareMathOperator{\trace}{trace}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+\newcommand{\vc}[1] { \mathbf{#1} }
+\newcommand{\vs}[1] { \boldsymbol{#1} }
+
+# General Information to include
+
+-   **Time used for reading and self-study exercises**: \~ 12 hours.
+-   **Time used for the assignment**: \~10 hours
+-   **Good with assignment**: This assignment helped me understand the concepts of the leave-one-out cross-validation specially $\text{elpd}_\text{loo-cv}$ and $p_\text{eff}$, which after reading the book were not that clear. 
+-   **Things to improve in the assignment**:  
+
+```{r setup, include=FALSE}
+# This chunk sets echo = TRUE as default, that is, print all code.
+# knitr::opts_chunk$set can be used to set other notebook generation options, too.
+# include=FALSE inside curly brackets makes this block not be included in the pdf.
+knitr::opts_chunk$set(echo = TRUE)
+library(bsda)
+library(tigerstats)
+library(rjson)
+library(rstan)
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(posterior)
+library(bayesplot)
+library(bayestestR)
+```
+
+# Model assessment: LOO-CV for factory data with Stan
+
+Use leave-one-out cross-validation (LOO-CV) to assess the predictive performance of the pooled, separate and hierarchical Gaussian models for the factory dataset (see the second exercise in Assignment 7). To read in the data, just use:
+
+```{r}
+library(bsda)
+data("factory")
+# to replicate results
+set.seed(123)
+```
+
+
+## 1. Fit the models with Stan as instructed in Assignment~7. To use the   ${\tt loo}$ or ${\tt psisloo}$ functions, you need to compute the log-likelihood values of each observation for every posterior draw (i.e. an $S$-by-$N$ matrix, where $S$ is the number of posterior draws and $N=30$ is the total number of observations). This can be done in the {\texttt{generated quantities}} block in the Stan code.
+
+Separate model: 
+
+$$
+\begin{aligned}
+    y_{ij} &\sim N(\mu_j,\sigma_j)\\
+    \mu_{j} &\sim N(95,20)\\
+    \sigma_{j} &\sim \Invchi2(10)
+\end{aligned}
+$$
+
+Here is the Stan code from \texttt{assignment7\_separate.stan}
+
+```{js}
+data {
+  int<lower=0> N;
+  int<lower=0> J;
+  vector[J] y[N];
+}
+
+parameters {
+  vector[J] mu;
+  vector<lower=0>[J] sigma;
+}
+
+model {
+  // priors
+  for (j in 1:J){
+    mu[j] ~ normal(95, 20);
+    sigma[j] ~ inv_chi_square(10);
+  }
+
+  // likelihood
+  for (j in 1:J){
+    y[,j] ~ normal(mu[j], sigma[j]);
+  }
+}
+
+generated quantities {
+  real ypred1;
+  real ypred2;
+  real ypred3;
+  real ypred4;
+  real ypred5;
+  real ypred6;
+  vector[J] log_lik[N];
+  // Compute predictive distribution
+  ypred1 = normal_rng(mu[1], sigma[1]);
+  ypred2 = normal_rng(mu[2], sigma[2]);
+  ypred3 = normal_rng(mu[3], sigma[3]);
+  ypred4 = normal_rng(mu[4], sigma[4]);
+  ypred5 = normal_rng(mu[5], sigma[5]);
+  ypred6 = normal_rng(mu[6], sigma[6]);
+  // assignment 8 loo
+  for (j in 1:J) {
+    for (n in 1:N) {
+      log_lik[n, j] = normal_lpdf(y[n,j] | mu[j], sigma[j]);
+    }
+  }
+  
+}
+```
+
+Here is the R implementation
+
+```{r, warning=FALSE}
+options(mc.cores = parallel::detectCores())
+sm_sep <- rstan::stan_model(file = "assignment7_separate.stan")
+
+stan_data_separate <- list(
+  y = factory,
+  N = nrow(factory),
+  J = ncol(factory)
+)
+
+model_separate <- rstan::sampling(sm_sep, data = stan_data_separate, seed=123)
+
+set.seed(123)
+log_lik_sep <- loo::extract_log_lik(model_separate, merge_chains = FALSE)
+r_eff_sep <- loo::relative_eff(exp(log_lik_sep), cores = 8)
+loo_sep <- loo::loo(log_lik_sep, r_eff = r_eff_sep, cores = 8)
+```
+
+
+Pooled model: 
+
+$$
+\begin{aligned}
+    y_{i} &\sim N(\mu,\sigma)\\
+    \mu_{} &\sim N(95,20)\\
+    \sigma_{} &\sim \Invchi2(10)
+\end{aligned}
+$$
+
+Here is the Stan code from \texttt{assignment7\_pooled.stan}
+
+```{js}
+data {
+  int<lower=0> N;
+  vector[N] y;
+}
+
+parameters {
+  real mu;
+  real<lower=0> sigma;
+}
+
+model {
+  // priors
+  mu ~ normal(95, 20);
+  sigma ~ inv_chi_square(10);
+
+  // likelihood
+  y ~ normal(mu, sigma);
+}
+
+generated quantities {
+  real ypred;
+  vector[N] log_lik;
+  // Compute predictive distribution
+  ypred = normal_rng(mu, sigma);
+  
+  for (i in 1:N){
+    log_lik[i] = normal_lpdf(y[i] | mu, sigma);
+  }
+  
+}
+```
+
+Here is the R implementation
+
+```{r, warning=FALSE}
+options(mc.cores = parallel::detectCores())
+sm_pool <- rstan::stan_model(file = "assignment7_pooled.stan")
+
+stan_data_pooled <- list(
+  y = unname(unlist(factory)),
+  N = nrow(factory) * ncol(factory)
+)
+
+model_pooled <- rstan::sampling(sm_pool, data = stan_data_pooled, seed= 123)
+
+set.seed(123)
+log_lik_pool <- loo::extract_log_lik(model_pooled, merge_chains = FALSE)
+r_eff_pool <- loo::relative_eff(exp(log_lik_pool), cores = 8)
+loo_pool <- loo::loo(log_lik_pool, r_eff = r_eff_pool, cores = 8)
+```
+
+
+Hierarchical model: 
+
+$$
+\begin{aligned}
+    y_{ij} &\sim N(\mu_{j},\sigma)\\
+    \mu_{j} &\sim N(\theta,\alpha)\\
+    \theta &\sim N(95,20)\\
+    \alpha &\sim Half-t(4,0,20)\\
+    \sigma &\sim \Invchi2(10)
+\end{aligned}
+$$
+
+Here is the Stan code from \texttt{assignment7\_h.stan}
+
+```{js}
+data {
+  int<lower=0> N;
+  int<lower=0> J;
+  vector[J] y[N];
+}
+
+parameters {
+  vector[J] mu;
+  real<lower=0> sigma;
+  real theta;
+  real<lower=0> alpha;
+}
+
+model {
+  theta ~ normal(95, 20);
+  alpha ~ student_t(4, 0, 20);
+  // priors
+  for (j in 1:J){
+    mu[j] ~ normal(theta, alpha);
+    sigma ~ inv_chi_square(10);
+  }
+
+  // likelihood
+  for (j in 1:J){
+    y[,j] ~ normal(mu[j], sigma);
+  }
+}
+
+generated quantities {
+  real ypred1;
+  real ypred2;
+  real ypred3;
+  real ypred4;
+  real ypred5;
+  real ypred6;
+  real ypred7;
+  real mu_pred7;
+  vector[J] log_lik[N];
+  // Compute predictive distribution
+  ypred1 = normal_rng(mu[1], sigma);
+  ypred2 = normal_rng(mu[2], sigma);
+  ypred3 = normal_rng(mu[3], sigma);
+  ypred4 = normal_rng(mu[4], sigma);
+  ypred5 = normal_rng(mu[5], sigma);
+  ypred6 = normal_rng(mu[6], sigma);
+  mu_pred7 = normal_rng(theta, alpha);
+  ypred7 = normal_rng(mu_pred7, sigma);
+  // assignment 8 loo
+  for (j in 1:J) {
+    for (n in 1:N) {
+      log_lik[n, j] = normal_lpdf(y[n,j] | mu[j], sigma);
+    }
+  }
+}
+```
+
+Here is the R implementation
+
+```{r, warning=FALSE}
+options(mc.cores = parallel::detectCores())
+sm_h <- rstan::stan_model(file = "assignment7_h.stan")
+
+stan_data_h <- list(
+  y = factory,
+  N = nrow(factory),
+  J = ncol(factory)
+)
+
+model_h <- rstan::sampling(sm_h, data = stan_data_h, seed= 123)
+
+set.seed(123)
+log_lik_h <- loo::extract_log_lik(model_h, merge_chains = FALSE)
+r_eff_h <- loo::relative_eff(exp(log_lik_h), cores = 8)
+loo_h <- loo::loo(log_lik_h, r_eff = r_eff_h, cores = 8)
+```
+
+
+## 2. Compute the PSIS-LOO elpd values and the $\hat{k}$-values for each of the three models.
+
+```{r, fig.height= 3}
+# Separate Model
+loo_sep
+plot(loo_sep, label_points = TRUE)
+# Pooled Model
+loo_pool
+plot(loo_pool, label_points = TRUE)
+# Hierarchical Model
+loo_h
+plot(loo_h, label_points = TRUE)
+```
+
+## 3. Compute the effective number of parameters $p_\text{eff}$ for each of the three models.
+
+```{r}
+# Separate Model
+loo_sep$estimates[2]
+# Pooled Model
+loo_pool$estimates[2]
+# Hierarchical Model
+loo_h$estimates[2]
+```
+
+## 4. Assess how reliable the PSIS-LOO estimates are for the three models based on the $\hat{k}$-values.
+
+Separate Model:
+
+- Pareto k diagnostic: 7 "bad" values with $\hat{k}$ greater than 0.7
+
+- This suggests potential problems with model fit in some observations. This model may not be as reliable in certain parts of the data.
+
+Pooled Model:
+
+- Pareto k diagnostic: 0 "bad" values with $\hat{k}$ greater than 0.7
+
+- This suggests that LOO estimates for this model are reliable.
+
+- This model appears to be the most reliable.
+
+Hierarchical Model:
+
+- Pareto k diagnostic: 1 "bad" value with $\hat{k}$ greater than 0.7
+
+- This model may not be as reliable in certain parts of the data.
+
+## 5. An assessment of whether there are differences between the models with regard to the $\text{elpd}_\text{loo-cv}$, and if so, which model should be selected according to PSIS-LOO.
+
+```{r}
+loo::loo_compare(loo_sep, loo_pool, loo_h)
+```
+
+The reference model in \texttt{loo\_compare} is automatically chosen and set to the model with the highest $\text{elpd}_\text{loo-cv}$ value. In this case, model2 which is the pooled model is the reference model, and the differences are calculated relative to it. Therefore, the pooled model is expected to have better predictive performance than the hierarchical and separate model.
+
+## 6. Both the Stan and R code should be included in your report.
