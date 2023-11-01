@@ -1,0 +1,5 @@
+Our paper employs a bivariate Poisson and a Skellam's distribution-based models to predict goal difference distributions in Swedish league soccer games. This work contributes to the extensive literature on soccer match outcome prediction, adopting a Bayesian framework to model score differences, with a particular focus on the under-explored Allsvenskan. Finally, we propose a simple betting strategy using our results. 
+
+You can read the full paper: BSDA23_Paper.pdf
+
+in the folder presentation you can find slides with a summary of the paper and results.
